@@ -19,3 +19,18 @@ data/
 frontend/node_modules/
 frontend/dist/
 frontend/.vite/
+
+# IDE / Editor
+*.code-workspace
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Claude plans
+.claude/plans/

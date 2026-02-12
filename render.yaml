@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: llm-council-api
+    runtime: python
+    buildCommand: pip install uv && uv sync
+    startCommand: uv run python -m backend.main
+    envVars:
+      - key: ALLOWED_ORIGINS
+        sync: false

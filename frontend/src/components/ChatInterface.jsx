@@ -9,6 +9,7 @@ export default function ChatInterface({
   conversation,
   onSendMessage,
   isLoading,
+  disabled,
 }) {
   const [input, setInput] = useState('');
   const messagesEndRef = useRef(null);
@@ -23,7 +24,7 @@ export default function ChatInterface({
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (input.trim() && !isLoading) {
+    if (input.trim() && !isLoading && !disabled) {
       onSendMessage(input);
       setInput('');
     }
@@ -128,13 +129,13 @@ export default function ChatInterface({
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            disabled={isLoading}
+            disabled={isLoading || disabled}
             rows={3}
           />
           <button
             type="submit"
             className="send-button"
-            disabled={!input.trim() || isLoading}
+            disabled={!input.trim() || isLoading || disabled}
           >
             Send
           </button>
