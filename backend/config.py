@@ -27,16 +27,16 @@ USD_INR_RATE_URL = os.getenv("USD_INR_RATE_URL", "https://open.er-api.com/v6/lat
 # Data directory for conversation storage
 DATA_DIR = "data/conversations"
 
-# Default council members (latest models as of 2025)
+# Default council members (latest models as of Feb 2026)
 DEFAULT_COUNCIL_MODELS = [
-    "openai/gpt-4o",
-    "anthropic/claude-3.5-sonnet",
-    "google/gemini-2.0-flash-001",
-    "x-ai/grok-2-1212",
+    "openai/o3",
+    "anthropic/claude-3.7-sonnet",
+    "google/gemini-2.5-pro",
+    "x-ai/grok-4",
 ]
 
 # Default chairman model
-DEFAULT_CHAIRMAN_MODEL = "anthropic/claude-3.5-sonnet"
+DEFAULT_CHAIRMAN_MODEL = "anthropic/claude-3.7-sonnet"
 
 
 def fallback_model_catalog() -> list[dict]:

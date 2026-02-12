@@ -5,12 +5,12 @@
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8001';
 const FALLBACK_DEFAULTS = {
   council: [
-    'openai/gpt-4o',
-    'anthropic/claude-3.5-sonnet',
-    'google/gemini-2.0-flash-001',
-    'x-ai/grok-2-1212',
+    'openai/o3',
+    'anthropic/claude-3.7-sonnet',
+    'google/gemini-2.5-pro',
+    'x-ai/grok-4',
   ],
-  chairman: 'anthropic/claude-3.5-sonnet',
+  chairman: 'anthropic/claude-3.7-sonnet',
 };
 
 async function readErrorDetail(response, fallbackMessage) {
