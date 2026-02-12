@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import './Sidebar.css';
 
 export default function Sidebar({
@@ -6,7 +7,36 @@ export default function Sidebar({
   onSelectConversation,
   onNewConversation,
   onOpenSettings,
+  onRenameConversation,
+  onDeleteConversation,
 }) {
+  const [editingId, setEditingId] = useState(null);
+  const [editingTitle, setEditingTitle] = useState('');
+
+  const startRename = (conversation) => {
+    setEditingId(conversation.id);
+    setEditingTitle(conversation.title || 'New Conversation');
+  };
+
+  const cancelRename = () => {
+    setEditingId(null);
+    setEditingTitle('');
+  };
+
+  const saveRename = async () => {
+    const trimmed = editingTitle.trim();
+    if (!trimmed || !editingId) return;
+    await onRenameConversation(editingId, trimmed);
+    cancelRename();
+  };
+
+  const handleDelete = async (conversation) => {
+    await onDeleteConversation(conversation);
+    if (editingId === conversation.id) {
+      cancelRename();
+    }
+  };
+
   return (
     <div className="sidebar">
       <div className="sidebar-header">
@@ -47,11 +77,81 @@ export default function Sidebar({
               className={`conversation-item ${
                 conv.id === currentConversationId ? 'active' : ''
               }`}
-              onClick={() => onSelectConversation(conv.id)}
+              onClick={() => {
+                if (editingId !== conv.id) onSelectConversation(conv.id);
+              }}
             >
-              <div className="conversation-title">
-                {conv.title || 'New Conversation'}
-              </div>
+              {editingId === conv.id ? (
+                <div className="conversation-edit-row" onClick={(e) => e.stopPropagation()}>
+                  <input
+                    className="conversation-title-input"
+                    value={editingTitle}
+                    onChange={(e) => setEditingTitle(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') saveRename();
+                      if (e.key === 'Escape') cancelRename();
+                    }}
+                    autoFocus
+                  />
+                  <button className="conversation-action-btn save" onClick={saveRename}>
+                    Save
+                  </button>
+                  <button className="conversation-action-btn" onClick={cancelRename}>
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <div className="conversation-title-row">
+                  <div className="conversation-title">
+                    {conv.title || 'New Conversation'}
+                  </div>
+                  <div className="conversation-actions" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      className="conversation-icon-btn"
+                      title="Rename"
+                      aria-label="Rename"
+                      onClick={() => startRename(conv)}
+                    >
+                      <svg
+                        width="13"
+                        height="13"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <path d="M12 20h9" />
+                        <path d="m16.5 3.5 4 4L8 20l-5 1 1-5 12.5-12.5z" />
+                      </svg>
+                    </button>
+                    <button
+                      className="conversation-icon-btn delete"
+                      title="Delete"
+                      aria-label="Delete"
+                      onClick={() => handleDelete(conv)}
+                    >
+                      <svg
+                        width="13"
+                        height="13"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <path d="M3 6h18" />
+                        <path d="M8 6V4h8v2" />
+                        <path d="M19 6l-1 14H6L5 6" />
+                        <path d="M10 11v6" />
+                        <path d="M14 11v6" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              )}
               <div className="conversation-meta">
                 {conv.message_count} messages
               </div>

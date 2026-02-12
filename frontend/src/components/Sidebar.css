@@ -94,9 +94,92 @@
   color: #333;
   font-size: 14px;
   margin-bottom: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .conversation-meta {
   color: #999;
   font-size: 12px;
+}
+
+.conversation-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.conversation-actions {
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.conversation-item:hover .conversation-actions {
+  opacity: 1;
+}
+
+.conversation-icon-btn {
+  border: 1px solid #d0d0d0;
+  background: #fff;
+  border-radius: 4px;
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  line-height: 1;
+  color: #666;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.conversation-icon-btn:hover {
+  background: #f0f0f0;
+}
+
+.conversation-icon-btn.delete:hover {
+  background: #fdeaea;
+  border-color: #f3b2b2;
+  color: #b82222;
+}
+
+.conversation-edit-row {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.conversation-title-input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid #d0d0d0;
+  border-radius: 6px;
+  font-size: 13px;
+  padding: 6px 8px;
+}
+
+.conversation-title-input:focus {
+  outline: none;
+  border-color: #4a90e2;
+}
+
+.conversation-action-btn {
+  border: 1px solid #d0d0d0;
+  border-radius: 6px;
+  background: #fff;
+  color: #555;
+  font-size: 11px;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+.conversation-action-btn.save {
+  background: #4a90e2;
+  color: #fff;
+  border-color: #4a90e2;
 }

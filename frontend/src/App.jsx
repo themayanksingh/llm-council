@@ -2,8 +2,19 @@ import { useState, useEffect, useCallback } from 'react';
 import Sidebar from './components/Sidebar';
 import ChatInterface from './components/ChatInterface';
 import SettingsPanel from './components/SettingsPanel';
+import ModalDialog from './components/ModalDialog';
 import { api, configStore } from './api';
 import './App.css';
+
+const FALLBACK_DEFAULTS = {
+  council: [
+    'openai/gpt-5.1',
+    'google/gemini-3-pro-preview',
+    'anthropic/claude-sonnet-4.5',
+    'x-ai/grok-4',
+  ],
+  chairman: 'google/gemini-3-pro-preview',
+};
 
 function App() {
   const [conversations, setConversations] = useState([]);
@@ -11,6 +22,10 @@ function App() {
   const [currentConversation, setCurrentConversation] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [hasServerApiAccess, setHasServerApiAccess] = useState(false);
+  const [usdInrRate, setUsdInrRate] = useState(83.0);
+  const [pendingDeleteConversation, setPendingDeleteConversation] = useState(null);
+  const [errorDialog, setErrorDialog] = useState(null);
 
   // Config state (hydrated from localStorage)
   const [config, setConfig] = useState({
@@ -26,20 +41,27 @@ function App() {
     loadConversations();
   }, []);
 
-  // Fetch available models when API key changes
+  // Fetch available models when API key changes (or when using server-side fallback key)
   const fetchModels = useCallback(async (apiKey) => {
-    if (!apiKey) return;
     try {
       const data = await api.getAvailableModels(apiKey);
+      setHasServerApiAccess(true);
       setConfig((prev) => ({
         ...prev,
         availableModels: data.models || [],
         defaults: data.defaults || prev.defaults,
         // Apply defaults if no localStorage selections
-        councilModels: prev.councilModels || data.defaults.council,
-        chairmanModel: prev.chairmanModel || data.defaults.chairman,
+        councilModels: prev.councilModels || data.defaults?.council || prev.defaults?.council || [],
+        chairmanModel: prev.chairmanModel || data.defaults?.chairman || prev.defaults?.chairman || '',
       }));
     } catch (err) {
+      setHasServerApiAccess(false);
+      setConfig((prev) => ({
+        ...prev,
+        defaults: prev.defaults?.council?.length ? prev.defaults : FALLBACK_DEFAULTS,
+        councilModels: prev.councilModels || prev.defaults?.council || FALLBACK_DEFAULTS.council,
+        chairmanModel: prev.chairmanModel || prev.defaults?.chairman || FALLBACK_DEFAULTS.chairman,
+      }));
       console.error('Failed to fetch models:', err);
     }
   }, []);
@@ -47,6 +69,20 @@ function App() {
   useEffect(() => {
     fetchModels(config.apiKey);
   }, [config.apiKey, fetchModels]);
+
+  useEffect(() => {
+    const fetchFxRate = async () => {
+      try {
+        const data = await api.getUsdInrRate();
+        if (typeof data.usd_inr === 'number' && data.usd_inr > 0) {
+          setUsdInrRate(data.usd_inr);
+        }
+      } catch (error) {
+        console.error('Failed to fetch USD/INR rate:', error);
+      }
+    };
+    fetchFxRate();
+  }, []);
 
   // Load conversation details when selected
   useEffect(() => {
@@ -90,14 +126,94 @@ function App() {
     setCurrentConversationId(id);
   };
 
+  const handleRenameConversation = async (conversationId, title) => {
+    try {
+      const updated = await api.renameConversation(conversationId, title);
+      setConversations((prev) => prev.map((conv) => (
+        conv.id === conversationId ? { ...conv, title: updated.title } : conv
+      )));
+      if (currentConversationId === conversationId) {
+        setCurrentConversation((prev) => (
+          prev ? { ...prev, title: updated.title } : prev
+        ));
+      }
+    } catch (error) {
+      console.error('Failed to rename conversation:', error);
+      setErrorDialog({
+        title: 'Rename Failed',
+        message: error.message || 'Failed to rename conversation',
+      });
+    }
+  };
+
+  const handleDeleteConversation = async (conversation) => {
+    setPendingDeleteConversation(conversation);
+  };
+
+  const confirmDeleteConversation = async () => {
+    if (!pendingDeleteConversation) return;
+    const conversationId = pendingDeleteConversation.id;
+
+    try {
+      await api.deleteConversation(conversationId);
+      const refreshed = await api.listConversations();
+      setConversations(refreshed);
+
+      if (currentConversationId === conversationId) {
+        const nextConversationId = refreshed.length > 0 ? refreshed[0].id : null;
+        setCurrentConversationId(nextConversationId);
+        if (!nextConversationId) {
+          setCurrentConversation(null);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to delete conversation:', error);
+      setErrorDialog({
+        title: 'Delete Failed',
+        message: error.message || 'Failed to delete conversation',
+      });
+    } finally {
+      setPendingDeleteConversation(null);
+    }
+  };
+
   const handleConfigChange = (updates) => {
+    if (Object.prototype.hasOwnProperty.call(updates, 'councilModels')) {
+      configStore.setCouncilModels(updates.councilModels);
+    }
+    if (Object.prototype.hasOwnProperty.call(updates, 'chairmanModel')) {
+      configStore.setChairmanModel(updates.chairmanModel);
+    }
     setConfig((prev) => ({ ...prev, ...updates }));
+  };
+
+  const handleAddCouncilModel = (modelId) => {
+    if (!modelId) return;
+    const current = config.councilModels || [];
+    if (current.includes(modelId)) return;
+    const next = [...current, modelId];
+    configStore.setCouncilModels(next);
+    setConfig((prev) => ({ ...prev, councilModels: next }));
+  };
+
+  const handleRemoveCouncilModel = (modelId) => {
+    const current = config.councilModels || [];
+    const next = current.filter((id) => id !== modelId);
+    if (next.length < 2) return;
+    configStore.setCouncilModels(next);
+    setConfig((prev) => ({ ...prev, councilModels: next }));
+  };
+
+  const handleChangeChairmanModel = (modelId) => {
+    configStore.setChairmanModel(modelId);
+    setConfig((prev) => ({ ...prev, chairmanModel: modelId }));
   };
 
   const handleSendMessage = async (content) => {
     if (!currentConversationId) return;
+    const canSend = Boolean(config.apiKey || hasServerApiAccess);
 
-    if (!config.apiKey) {
+    if (!canSend) {
       setSettingsOpen(true);
       return;
     }
@@ -238,9 +354,11 @@ function App() {
         onSelectConversation={handleSelectConversation}
         onNewConversation={handleNewConversation}
         onOpenSettings={() => setSettingsOpen(true)}
+        onRenameConversation={handleRenameConversation}
+        onDeleteConversation={handleDeleteConversation}
       />
       <div className="main-area">
-        {!config.apiKey && (
+        {!Boolean(config.apiKey || hasServerApiAccess) && (
           <div className="api-key-banner">
             <span>Set your OpenRouter API key to get started.</span>
             <button onClick={() => setSettingsOpen(true)}>Open Settings</button>
@@ -250,7 +368,14 @@ function App() {
           conversation={currentConversation}
           onSendMessage={handleSendMessage}
           isLoading={isLoading}
-          disabled={!config.apiKey}
+          disabled={!Boolean(config.apiKey || hasServerApiAccess)}
+          availableModels={config.availableModels}
+          councilModels={config.councilModels || []}
+          chairmanModel={config.chairmanModel || ''}
+          onAddCouncilModel={handleAddCouncilModel}
+          onRemoveCouncilModel={handleRemoveCouncilModel}
+          onChangeChairmanModel={handleChangeChairmanModel}
+          usdInrRate={usdInrRate}
         />
       </div>
       <SettingsPanel
@@ -258,6 +383,23 @@ function App() {
         onClose={() => setSettingsOpen(false)}
         config={config}
         onConfigChange={handleConfigChange}
+      />
+      <ModalDialog
+        isOpen={Boolean(pendingDeleteConversation)}
+        title="Delete Conversation"
+        message={`Delete "${pendingDeleteConversation?.title || 'New Conversation'}"? This action cannot be undone.`}
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        onConfirm={confirmDeleteConversation}
+        onCancel={() => setPendingDeleteConversation(null)}
+        danger
+      />
+      <ModalDialog
+        isOpen={Boolean(errorDialog)}
+        title={errorDialog?.title || 'Error'}
+        message={errorDialog?.message || 'Something went wrong.'}
+        confirmLabel="OK"
+        onConfirm={() => setErrorDialog(null)}
       />
     </div>
   );

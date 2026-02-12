@@ -3,6 +3,27 @@
  */
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8001';
+const FALLBACK_DEFAULTS = {
+  council: [
+    'openai/gpt-4o',
+    'anthropic/claude-3.5-sonnet',
+    'google/gemini-2.0-flash-001',
+    'x-ai/grok-2-1212',
+  ],
+  chairman: 'anthropic/claude-3.5-sonnet',
+};
+
+async function readErrorDetail(response, fallbackMessage) {
+  const errorPayload = await response.json().catch(() => ({}));
+  const detail = errorPayload.detail || fallbackMessage;
+  if (detail === 'Not Found') {
+    return 'Backend route not found. Restart backend server and try again.';
+  }
+  if (detail === 'Method Not Allowed') {
+    return 'Route exists but method is unsupported by the running backend. Restart backend server and try again.';
+  }
+  return detail;
+}
 
 // --- localStorage / sessionStorage helpers ---
 
@@ -81,6 +102,26 @@ export const configStore = {
 
 export const api = {
   /**
+   * Fetch live USD->INR exchange rate from backend.
+   */
+  async getUsdInrRate() {
+    const response = await fetch(`${API_BASE}/api/fx/usd-inr`);
+    if (!response.ok) {
+      // Older backend versions may not have this endpoint.
+      if (response.status === 404 || response.status === 405) {
+        return {
+          usd_inr: 83.0,
+          source: 'fallback',
+          fetched_at: Math.floor(Date.now() / 1000),
+          stale: true,
+        };
+      }
+      throw new Error(await readErrorDetail(response, 'Failed to fetch USD/INR rate'));
+    }
+    return response.json();
+  },
+
+  /**
    * Fetch available models from OpenRouter via backend.
    */
   async getAvailableModels(apiKey) {
@@ -89,8 +130,11 @@ export const api = {
 
     const response = await fetch(`${API_BASE}/api/models`, { headers });
     if (!response.ok) {
-      const err = await response.json().catch(() => ({}));
-      throw new Error(err.detail || 'Failed to fetch models');
+      // Older backend versions may not have /api/models.
+      if (response.status === 404 || response.status === 405) {
+        return { models: [], defaults: FALLBACK_DEFAULTS };
+      }
+      throw new Error(await readErrorDetail(response, 'Failed to fetch models'));
     }
     return response.json();
   },
@@ -137,6 +181,78 @@ export const api = {
   },
 
   /**
+   * Rename a specific conversation.
+   */
+  async renameConversation(conversationId, title) {
+    // Use POST action route for environments that block PATCH.
+    let response = await fetch(
+      `${API_BASE}/api/conversations/${conversationId}/rename`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ title }),
+      }
+    );
+
+    // Fallback to legacy REST route if action route doesn't exist.
+    if (!response.ok && (response.status === 404 || response.status === 405)) {
+      response = await fetch(
+        `${API_BASE}/api/conversations/${conversationId}`,
+        {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ title }),
+        }
+      );
+    }
+
+    if (!response.ok && (response.status === 404 || response.status === 405)) {
+      throw new Error('Rename is not supported by the currently running backend. Restart backend and try again.');
+    }
+
+    if (!response.ok) {
+      throw new Error(await readErrorDetail(response, 'Failed to rename conversation'));
+    }
+    return response.json();
+  },
+
+  /**
+   * Delete a specific conversation.
+   */
+  async deleteConversation(conversationId) {
+    // Use POST action route for environments that block DELETE.
+    let response = await fetch(
+      `${API_BASE}/api/conversations/${conversationId}/delete`,
+      {
+        method: 'POST',
+      }
+    );
+
+    // Fallback to legacy REST route if action route doesn't exist.
+    if (!response.ok && (response.status === 404 || response.status === 405)) {
+      response = await fetch(
+        `${API_BASE}/api/conversations/${conversationId}`,
+        {
+          method: 'DELETE',
+        }
+      );
+    }
+
+    if (!response.ok && (response.status === 404 || response.status === 405)) {
+      throw new Error('Delete is not supported by the currently running backend. Restart backend and try again.');
+    }
+
+    if (!response.ok) {
+      throw new Error(await readErrorDetail(response, 'Failed to delete conversation'));
+    }
+    return response.json();
+  },
+
+  /**
    * Send a message in a conversation.
    */
   async sendMessage(conversationId, content, config = {}) {
@@ -169,7 +285,7 @@ export const api = {
    * @param {object} config - { apiKey, councilModels, chairmanModel }
    * @param {function} onEvent - (eventType, data) => void
    */
-  async sendMessageStream(conversationId, content, config, onEvent) {
+  async sendMessageStream(conversationId, content, config = {}, onEvent) {
     const headers = { 'Content-Type': 'application/json' };
     if (config.apiKey) headers['X-OpenRouter-Key'] = config.apiKey;
 

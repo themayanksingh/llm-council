@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { configStore } from '../api';
 import './SettingsPanel.css';
 
@@ -11,6 +11,13 @@ export default function SettingsPanel({
   const [apiKeyInput, setApiKeyInput] = useState(config.apiKey || '');
   const [showKey, setShowKey] = useState(false);
   const [sessionOnly, setSessionOnly] = useState(configStore.isSessionOnly());
+
+  useEffect(() => {
+    if (isOpen) {
+      setApiKeyInput(config.apiKey || '');
+      setSessionOnly(configStore.isSessionOnly());
+    }
+  }, [isOpen, config.apiKey]);
 
   // Group available models by provider
   const groupedModels = useMemo(() => {

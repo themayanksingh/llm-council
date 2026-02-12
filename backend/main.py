@@ -16,6 +16,7 @@ from .config import (
     DEFAULT_COUNCIL_MODELS,
     DEFAULT_CHAIRMAN_MODEL,
     fetch_available_models,
+    fetch_usd_to_inr_rate,
 )
 from .council import (
     run_full_council,
@@ -55,6 +56,80 @@ def get_api_key(request: Request) -> str:
     return key
 
 
+def validate_model_selection(
+    council_models: Optional[List[str]],
+    chairman_model: Optional[str],
+    available_model_ids: set[str],
+) -> tuple[List[str], str]:
+    """Validate and normalize selected council/chairman models."""
+    selected_council = list(dict.fromkeys(council_models or DEFAULT_COUNCIL_MODELS))
+    selected_chairman = chairman_model or DEFAULT_CHAIRMAN_MODEL
+
+    if len(selected_council) < 2:
+        raise HTTPException(status_code=400, detail="At least 2 council models are required.")
+    if not selected_chairman:
+        raise HTTPException(status_code=400, detail="Chairman model is required.")
+
+    # If model catalog is available, validate IDs strictly.
+    if available_model_ids:
+        unknown_council = [m for m in selected_council if m not in available_model_ids]
+        if unknown_council:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown council model(s): {', '.join(unknown_council)}",
+            )
+        if selected_chairman not in available_model_ids:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown chairman model: {selected_chairman}",
+            )
+
+    return selected_council, selected_chairman
+
+
+def _truncate_text(text: str, max_chars: int = 1800) -> str:
+    """Truncate long text before injecting it into council context."""
+    if len(text) <= max_chars:
+        return text
+    return f"{text[:max_chars]}..."
+
+
+def build_contextual_query(user_query: str, prior_messages: List[Dict[str, Any]]) -> str:
+    """Build a contextual prompt from recent conversation history."""
+    if not prior_messages:
+        return user_query
+
+    max_messages = int(os.getenv("COUNCIL_CONTEXT_MESSAGES", "8"))
+    recent = prior_messages[-max_messages:]
+
+    history_lines = []
+    for message in recent:
+        role = message.get("role")
+        if role == "user":
+            content = (message.get("content") or "").strip()
+            if content:
+                history_lines.append(f"User: {_truncate_text(content)}")
+            continue
+
+        if role == "assistant":
+            stage3 = message.get("stage3") or {}
+            response = (stage3.get("response") if isinstance(stage3, dict) else "") or ""
+            response = response.strip()
+            if response:
+                history_lines.append(f"Assistant: {_truncate_text(response)}")
+
+    if not history_lines:
+        return user_query
+
+    history_text = "\n\n".join(history_lines)
+    return (
+        "Use the following conversation context to answer the latest question.\n"
+        "Focus on the latest user question, but keep continuity with prior turns when relevant.\n\n"
+        f"Conversation so far:\n{history_text}\n\n"
+        f"Latest user question:\n{user_query}"
+    )
+
+
 # --- Request/Response models ---
 
 class CreateConversationRequest(BaseModel):
@@ -67,6 +142,11 @@ class SendMessageRequest(BaseModel):
     content: str
     council_models: Optional[List[str]] = None
     chairman_model: Optional[str] = None
+
+
+class RenameConversationRequest(BaseModel):
+    """Request to rename a conversation."""
+    title: str
 
 
 class ConversationMetadata(BaseModel):
@@ -107,6 +187,12 @@ async def get_available_models(request: Request):
     }
 
 
+@app.get("/api/fx/usd-inr")
+async def get_usd_inr_rate():
+    """Return the latest cached USD->INR exchange rate."""
+    return await fetch_usd_to_inr_rate()
+
+
 @app.get("/api/conversations", response_model=List[ConversationMetadata])
 async def list_conversations():
     """List all conversations (metadata only)."""
@@ -130,6 +216,50 @@ async def get_conversation(conversation_id: str):
     return conversation
 
 
+@app.patch("/api/conversations/{conversation_id}", response_model=ConversationMetadata)
+async def rename_conversation(conversation_id: str, request_body: RenameConversationRequest):
+    """Rename an existing conversation."""
+    conversation = storage.get_conversation(conversation_id)
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    title = request_body.title.strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="Title cannot be empty.")
+    if len(title) > 120:
+        raise HTTPException(status_code=400, detail="Title must be 120 characters or fewer.")
+
+    storage.update_conversation_title(conversation_id, title)
+    updated = storage.get_conversation(conversation_id)
+    return {
+        "id": updated["id"],
+        "created_at": updated["created_at"],
+        "title": updated.get("title", "New Conversation"),
+        "message_count": len(updated.get("messages", [])),
+    }
+
+
+@app.post("/api/conversations/{conversation_id}/rename", response_model=ConversationMetadata)
+async def rename_conversation_post(conversation_id: str, request_body: RenameConversationRequest):
+    """Rename an existing conversation (POST fallback for restricted clients)."""
+    return await rename_conversation(conversation_id, request_body)
+
+
+@app.delete("/api/conversations/{conversation_id}")
+async def delete_conversation(conversation_id: str):
+    """Delete a conversation."""
+    deleted = storage.delete_conversation(conversation_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return {"status": "deleted", "id": conversation_id}
+
+
+@app.post("/api/conversations/{conversation_id}/delete")
+async def delete_conversation_post(conversation_id: str):
+    """Delete a conversation (POST fallback for restricted clients)."""
+    return await delete_conversation(conversation_id)
+
+
 @app.post("/api/conversations/{conversation_id}/message")
 async def send_message(
     conversation_id: str,
@@ -145,16 +275,19 @@ async def send_message(
         raise HTTPException(status_code=404, detail="Conversation not found")
 
     api_key = get_api_key(request)
-    council_models = request_body.council_models or DEFAULT_COUNCIL_MODELS
-    chairman_model = request_body.chairman_model or DEFAULT_CHAIRMAN_MODEL
-
-    # Validate
-    if len(council_models) < 2:
-        raise HTTPException(status_code=400, detail="At least 2 council models are required.")
-    if not chairman_model:
-        raise HTTPException(status_code=400, detail="Chairman model is required.")
+    available_models = await fetch_available_models(api_key)
+    available_model_ids = {m.get("id", "") for m in available_models if m.get("id")}
+    council_models, chairman_model = validate_model_selection(
+        request_body.council_models,
+        request_body.chairman_model,
+        available_model_ids,
+    )
 
     is_first_message = len(conversation["messages"]) == 0
+    council_query = build_contextual_query(
+        request_body.content,
+        conversation.get("messages", []),
+    )
     storage.add_user_message(conversation_id, request_body.content)
 
     if is_first_message:
@@ -162,7 +295,7 @@ async def send_message(
         storage.update_conversation_title(conversation_id, title)
 
     stage1_results, stage2_results, stage3_result, metadata = await run_full_council(
-        request_body.content, council_models, chairman_model, api_key
+        council_query, council_models, chairman_model, api_key
     )
 
     storage.add_assistant_message(conversation_id, stage1_results, stage2_results, stage3_result)
@@ -190,16 +323,19 @@ async def send_message_stream(
         raise HTTPException(status_code=404, detail="Conversation not found")
 
     api_key = get_api_key(request)
-    council_models = request_body.council_models or DEFAULT_COUNCIL_MODELS
-    chairman_model = request_body.chairman_model or DEFAULT_CHAIRMAN_MODEL
-
-    # Validate
-    if len(council_models) < 2:
-        raise HTTPException(status_code=400, detail="At least 2 council models are required.")
-    if not chairman_model:
-        raise HTTPException(status_code=400, detail="Chairman model is required.")
+    available_models = await fetch_available_models(api_key)
+    available_model_ids = {m.get("id", "") for m in available_models if m.get("id")}
+    council_models, chairman_model = validate_model_selection(
+        request_body.council_models,
+        request_body.chairman_model,
+        available_model_ids,
+    )
 
     is_first_message = len(conversation["messages"]) == 0
+    council_query = build_contextual_query(
+        request_body.content,
+        conversation.get("messages", []),
+    )
 
     async def event_generator():
         try:
@@ -215,7 +351,7 @@ async def send_message_stream(
             # Stage 1: Collect responses
             yield f"data: {json.dumps({'type': 'stage1_start'})}\n\n"
             stage1_results = await stage1_collect_responses(
-                request_body.content, council_models, api_key
+                council_query, council_models, api_key
             )
             yield f"data: {json.dumps({'type': 'stage1_complete', 'data': stage1_results})}\n\n"
 
@@ -226,7 +362,7 @@ async def send_message_stream(
             # Stage 2: Collect rankings
             yield f"data: {json.dumps({'type': 'stage2_start'})}\n\n"
             stage2_results, label_to_model = await stage2_collect_rankings(
-                request_body.content, stage1_results, council_models, api_key
+                council_query, stage1_results, council_models, api_key
             )
             aggregate_rankings = calculate_aggregate_rankings(stage2_results, label_to_model)
             yield f"data: {json.dumps({'type': 'stage2_complete', 'data': stage2_results, 'metadata': {'label_to_model': label_to_model, 'aggregate_rankings': aggregate_rankings}})}\n\n"
@@ -234,7 +370,7 @@ async def send_message_stream(
             # Stage 3: Synthesize final answer
             yield f"data: {json.dumps({'type': 'stage3_start'})}\n\n"
             stage3_result = await stage3_synthesize_final(
-                request_body.content, stage1_results, stage2_results,
+                council_query, stage1_results, stage2_results,
                 chairman_model, api_key
             )
             yield f"data: {json.dumps({'type': 'stage3_complete', 'data': stage3_result})}\n\n"
