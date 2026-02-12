@@ -8,9 +8,9 @@ import './App.css';
 
 const FALLBACK_DEFAULTS = {
   council: [
-    'openai/gpt-5.1',
-    'google/gemini-3-pro-preview',
+    'openai/gpt-5.2',
     'anthropic/claude-sonnet-4.5',
+    'google/gemini-3-pro-preview',
     'x-ai/grok-4',
   ],
   chairman: 'google/gemini-3-pro-preview',
