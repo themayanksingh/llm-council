@@ -29,14 +29,14 @@ DATA_DIR = "data/conversations"
 
 # Default council members (latest models as of Feb 2026)
 DEFAULT_COUNCIL_MODELS = [
-    "openai/o3",
-    "anthropic/claude-3.7-sonnet",
-    "google/gemini-2.5-pro",
+    "openai/gpt-5.2",
+    "anthropic/claude-sonnet-4.5",
+    "google/gemini-3-pro-preview",
     "x-ai/grok-4",
 ]
 
 # Default chairman model
-DEFAULT_CHAIRMAN_MODEL = "anthropic/claude-3.7-sonnet"
+DEFAULT_CHAIRMAN_MODEL = "google/gemini-3-pro-preview"
 
 
 def fallback_model_catalog() -> list[dict]:
