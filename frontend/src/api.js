@@ -32,6 +32,8 @@ const STORAGE_KEYS = {
   councilModels: 'llm_council_models',
   chairmanModel: 'llm_council_chairman',
   sessionOnly: 'llm_council_session_only',
+  // Track if user has explicitly customized their model selection
+  modelsCustomized: 'llm_council_models_customized',
 };
 
 function getStore() {
@@ -67,6 +69,15 @@ export const configStore = {
   },
   setChairmanModel(model) {
     localStorage.setItem(STORAGE_KEYS.chairmanModel, model);
+  },
+
+  // Track if user has explicitly customized their model selection
+  // If not customized, always use latest defaults from backend
+  isModelsCustomized() {
+    return localStorage.getItem(STORAGE_KEYS.modelsCustomized) === 'true';
+  },
+  setModelsCustomized(value) {
+    localStorage.setItem(STORAGE_KEYS.modelsCustomized, value ? 'true' : 'false');
   },
 
   isSessionOnly() {

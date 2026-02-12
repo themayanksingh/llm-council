@@ -66,6 +66,7 @@ export default function SettingsPanel({
     if (current.includes(modelId)) return;
     const next = [...current, modelId];
     configStore.setCouncilModels(next);
+    configStore.setModelsCustomized(true);  // Mark as customized
     onConfigChange({ councilModels: next });
   };
 
@@ -74,16 +75,20 @@ export default function SettingsPanel({
     const next = current.filter((id) => id !== modelId);
     if (next.length < 2) return; // enforce minimum
     configStore.setCouncilModels(next);
+    configStore.setModelsCustomized(true);  // Mark as customized
     onConfigChange({ councilModels: next });
   };
 
   const handleChairmanChange = (modelId) => {
     configStore.setChairmanModel(modelId);
+    configStore.setModelsCustomized(true);  // Mark as customized
     onConfigChange({ chairmanModel: modelId });
   };
 
   const handleResetDefaults = () => {
     configStore.clearAll();
+    // Also clear the customized flag
+    localStorage.removeItem('llm_council_models_customized');
     onConfigChange({
       apiKey: '',
       councilModels: config.defaults?.council || [],

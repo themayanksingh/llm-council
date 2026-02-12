@@ -13,8 +13,8 @@ import asyncio
 from . import storage
 from .config import (
     OPENROUTER_API_KEY,
-    DEFAULT_COUNCIL_MODELS,
-    DEFAULT_CHAIRMAN_MODEL,
+    get_default_council_models,
+    get_default_chairman_model,
     fetch_available_models,
     fetch_usd_to_inr_rate,
 )
@@ -175,15 +175,17 @@ async def root():
 
 @app.get("/api/models")
 async def get_available_models(request: Request):
-    """Return available models from OpenRouter + defaults."""
+    """Return available models from OpenRouter + dynamic defaults (latest from each provider)."""
     api_key = get_api_key(request)
     models = await fetch_available_models(api_key)
+    # Dynamically compute latest defaults from fetched models
+    defaults = {
+        "council": get_default_council_models(models),
+        "chairman": get_default_chairman_model(models),
+    }
     return {
         "models": models,
-        "defaults": {
-            "council": DEFAULT_COUNCIL_MODELS,
-            "chairman": DEFAULT_CHAIRMAN_MODEL,
-        },
+        "defaults": defaults,
     }
 
 

@@ -27,11 +27,12 @@ function App() {
   const [pendingDeleteConversation, setPendingDeleteConversation] = useState(null);
   const [errorDialog, setErrorDialog] = useState(null);
 
-  // Config state (hydrated from localStorage)
+  // Config state - models will be populated from backend defaults
+  // Only use localStorage if user has explicitly customized
   const [config, setConfig] = useState({
     apiKey: configStore.getApiKey(),
-    councilModels: configStore.getCouncilModels(),
-    chairmanModel: configStore.getChairmanModel(),
+    councilModels: null,  // Will be set from backend defaults
+    chairmanModel: null, // Will be set from backend defaults
     availableModels: [],
     defaults: { council: [], chairman: '' },
   });
@@ -43,6 +44,7 @@ function App() {
 
   // Fetch available models when API key changes (or when using server-side fallback key)
   const fetchModels = useCallback(async (apiKey) => {
+    const isCustomized = configStore.isModelsCustomized();
     try {
       const data = await api.getAvailableModels(apiKey);
       setHasServerApiAccess(true);
@@ -50,17 +52,25 @@ function App() {
         ...prev,
         availableModels: data.models || [],
         defaults: data.defaults || prev.defaults,
-        // Apply defaults if no localStorage selections
-        councilModels: prev.councilModels || data.defaults?.council || prev.defaults?.council || [],
-        chairmanModel: prev.chairmanModel || data.defaults?.chairman || prev.defaults?.chairman || '',
+        // Only use localStorage if user explicitly customized, otherwise use latest from backend
+        councilModels: (isCustomized && prev.councilModels) 
+          ? prev.councilModels 
+          : data.defaults?.council || prev.defaults?.council || [],
+        chairmanModel: (isCustomized && prev.chairmanModel) 
+          ? prev.chairmanModel 
+          : data.defaults?.chairman || prev.defaults?.chairman || '',
       }));
     } catch (err) {
       setHasServerApiAccess(false);
       setConfig((prev) => ({
         ...prev,
         defaults: prev.defaults?.council?.length ? prev.defaults : FALLBACK_DEFAULTS,
-        councilModels: prev.councilModels || prev.defaults?.council || FALLBACK_DEFAULTS.council,
-        chairmanModel: prev.chairmanModel || prev.defaults?.chairman || FALLBACK_DEFAULTS.chairman,
+        councilModels: (isCustomized && prev.councilModels) 
+          ? prev.councilModels 
+          : prev.defaults?.council || FALLBACK_DEFAULTS.council,
+        chairmanModel: (isCustomized && prev.chairmanModel) 
+          ? prev.chairmanModel 
+          : prev.defaults?.chairman || FALLBACK_DEFAULTS.chairman,
       }));
       console.error('Failed to fetch models:', err);
     }

@@ -27,21 +27,86 @@ USD_INR_RATE_URL = os.getenv("USD_INR_RATE_URL", "https://open.er-api.com/v6/lat
 # Data directory for conversation storage
 DATA_DIR = "data/conversations"
 
-# Default council members (latest models as of Feb 2026)
-DEFAULT_COUNCIL_MODELS = [
-    "openai/gpt-5.2",
-    "anthropic/claude-sonnet-4.5",
-    "google/gemini-3-pro-preview",
-    "x-ai/grok-4",
-]
+# Provider priority: which model ID patterns to consider as "latest" for each provider
+# Ordered by preference - first match wins
+PROVIDER_LATEST_PATTERNS = {
+    "openai": [
+        "gpt-5.2", "gpt-5.1", "gpt-5",  # GPT-5 series first
+        "gpt-4o", "gpt-4",  # GPT-4 fallback
+        "o3", "o1",  # O-series
+    ],
+    "google": [
+        "gemini-3-pro", "gemini-3",  # Gemini 3
+        "gemini-2.5-pro", "gemini-2.5", "gemini-2",  # Gemini 2
+        "gemini-1.5-pro", "gemini-1.5",  # Gemini 1.5 fallback
+    ],
+    "anthropic": [
+        "claude-sonnet-4.5", "claude-sonnet-4",  # Sonnet 4
+        "claude-3.7", "claude-3.5", "claude-3",  # Claude 3 series
+        "claude-opus-4", "claude-opus-3", "claude-opus",  # Opus fallback
+    ],
+    "x-ai": [
+        "grok-4", "grok-3", "grok-2",  # Grok series
+        "grok-beta", "grok",  # Grok beta fallback
+    ],
+}
 
-# Default chairman model
-DEFAULT_CHAIRMAN_MODEL = "google/gemini-3-pro-preview"
+
+def get_latest_models_by_provider(models: list[dict]) -> dict[str, str]:
+    """Return a dict mapping provider -> latest model ID for each of the 4 providers."""
+    latest = {}
+    for provider, patterns in PROVIDER_LATEST_PATTERNS.items():
+        # Find models matching this provider
+        provider_models = [m for m in models if m.get("provider", "").lower() == provider.lower()]
+        if not provider_models:
+            continue
+        
+        # Find best match based on patterns
+        for pattern in patterns:
+            for m in provider_models:
+                model_id = m.get("id", "").lower()
+                # Exact match or prefix match (e.g., "gpt-5.2" matches "gpt-5.2-pro")
+                if model_id == pattern or model_id.startswith(pattern + "-") or model_id.startswith(pattern):
+                    latest[provider] = m.get("id")
+                    break
+            if provider in latest:
+                break
+        
+        # Fallback: just pick the first one alphabetically if no pattern matches
+        if provider not in latest and provider_models:
+            sorted_models = sorted(provider_models, key=lambda m: m.get("id", ""), reverse=True)
+            latest[provider] = sorted_models[0].get("id")
+    
+    return latest
+
+
+def get_default_council_models(models: list[dict]) -> list[str]:
+    """Get the 4 default council models (one from each provider)."""
+    latest_by_provider = get_latest_models_by_provider(models)
+    # Return in order: OpenAI, Google, Anthropic, x-ai
+    order = ["openai", "google", "anthropic", "x-ai"]
+    return [latest_by_provider.get(p) for p in order if latest_by_provider.get(p)]
+
+
+def get_default_chairman_model(models: list[dict]) -> str:
+    """Get the default chairman model (uses the best available)."""
+    latest_by_provider = get_latest_models_by_provider(models)
+    # Prefer Anthropic for chairman, then OpenAI, then Google, then x-ai
+    for provider in ["anthropic", "openai", "google", "x-ai"]:
+        if provider in latest_by_provider:
+            return latest_by_provider[provider]
+    return ""
 
 
 def fallback_model_catalog() -> list[dict]:
     """Minimal fallback catalog used when live model fetch is unavailable."""
-    fallback_ids = list(dict.fromkeys([*DEFAULT_COUNCIL_MODELS, DEFAULT_CHAIRMAN_MODEL]))
+    # Hardcoded fallback IDs for when API is unavailable
+    fallback_ids = [
+        "openai/gpt-5.2",
+        "anthropic/claude-sonnet-4.5",
+        "google/gemini-3-pro-preview",
+        "x-ai/grok-4",
+    ]
     catalog = []
     for model_id in fallback_ids:
         provider = model_id.split("/")[0] if "/" in model_id else "unknown"
