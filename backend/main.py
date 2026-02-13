@@ -11,6 +11,7 @@ import json
 import asyncio
 
 from . import storage
+from . import auth
 from .config import (
     OPENROUTER_API_KEY,
     get_default_council_models,
@@ -54,6 +55,21 @@ def get_api_key(request: Request) -> str:
     if not key:
         raise HTTPException(status_code=401, detail="API key required. Set it in Settings.")
     return key
+
+
+def get_current_user(request: Request) -> str:
+    """Extract and verify user_id from JWT token in Authorization header."""
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Authentication required")
+    
+    token = auth_header.split(" ")[1]
+    user_id = auth.verify_jwt(token)
+    
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    
+    return user_id
 
 
 def validate_model_selection(
@@ -170,12 +186,77 @@ class Conversation(BaseModel):
     messages: List[Dict[str, Any]]
 
 
+class RequestOTPRequest(BaseModel):
+    """Request to send OTP to email."""
+    email: str
+
+
+class VerifyOTPRequest(BaseModel):
+    """Request to verify OTP and get JWT."""
+    email: str
+    otp: str
+
+
+class AuthResponse(BaseModel):
+    """Response after successful OTP verification."""
+    token: str
+    user_id: str
+    email: str
+
+
 # --- Endpoints ---
 
 @app.get("/")
 async def root():
     """Health check endpoint."""
     return {"status": "ok", "service": "LLM Council API"}
+
+
+@app.post("/api/auth/request-otp")
+async def request_otp(request_body: RequestOTPRequest):
+    """Send OTP to user's email."""
+    email = request_body.email.lower().strip()
+    
+    # Validate email format (basic)
+    if "@" not in email or "." not in email:
+        raise HTTPException(status_code=400, detail="Invalid email address")
+    
+    # Generate and store OTP
+    otp = auth.generate_otp()
+    auth.store_otp(email, otp)
+    
+    # Send OTP via email
+    success = await auth.send_otp_email(email, otp)
+    
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to send OTP email")
+    
+    return {"message": "OTP sent to email", "email": email}
+
+
+@app.post("/api/auth/verify-otp", response_model=AuthResponse)
+async def verify_otp(request_body: VerifyOTPRequest):
+    """Verify OTP and return JWT token."""
+    email = request_body.email.lower().strip()
+    otp = request_body.otp.strip()
+    
+    # Verify OTP
+    if not auth.verify_otp(email, otp):
+        raise HTTPException(status_code=401, detail="Invalid or expired OTP")
+    
+    # Get or create user
+    user = auth.get_user_by_email(email)
+    if not user:
+        user = auth.create_user(email)
+    
+    # Generate JWT
+    token = auth.generate_jwt(user["id"])
+    
+    return {
+        "token": token,
+        "user_id": user["id"],
+        "email": user["email"],
+    }
 
 
 @app.get("/api/models")
@@ -201,34 +282,44 @@ async def get_usd_inr_rate():
 
 
 @app.get("/api/conversations", response_model=List[ConversationMetadata])
-async def list_conversations():
-    """List all conversations (metadata only)."""
-    return storage.list_conversations()
+async def list_conversations(request: Request):
+    """List conversations for the authenticated user."""
+    user_id = get_current_user(request)
+    return storage.list_conversations(user_id)
 
 
 @app.post("/api/conversations", response_model=Conversation)
-async def create_conversation(request: CreateConversationRequest):
-    """Create a new conversation."""
+async def create_conversation(request: CreateConversationRequest, req: Request):
+    """Create a new conversation for the authenticated user."""
+    user_id = get_current_user(req)
     conversation_id = str(uuid.uuid4())
-    conversation = storage.create_conversation(conversation_id)
+    conversation = storage.create_conversation(conversation_id, user_id)
     return conversation
 
 
 @app.get("/api/conversations/{conversation_id}", response_model=Conversation)
-async def get_conversation(conversation_id: str):
+async def get_conversation(conversation_id: str, request: Request):
     """Get a specific conversation with all its messages."""
+    user_id = get_current_user(request)
     conversation = storage.get_conversation(conversation_id)
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
+    # Verify ownership
+    if conversation.get("user_id") != user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
     return conversation
 
 
 @app.patch("/api/conversations/{conversation_id}", response_model=ConversationMetadata)
-async def rename_conversation(conversation_id: str, request_body: RenameConversationRequest):
+async def rename_conversation(conversation_id: str, request_body: RenameConversationRequest, request: Request):
     """Rename an existing conversation."""
+    user_id = get_current_user(request)
     conversation = storage.get_conversation(conversation_id)
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
+    # Verify ownership
+    if conversation.get("user_id") != user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
 
     title = request_body.title.strip()
     if not title:
@@ -247,14 +338,22 @@ async def rename_conversation(conversation_id: str, request_body: RenameConversa
 
 
 @app.post("/api/conversations/{conversation_id}/rename", response_model=ConversationMetadata)
-async def rename_conversation_post(conversation_id: str, request_body: RenameConversationRequest):
+async def rename_conversation_post(conversation_id: str, request_body: RenameConversationRequest, request: Request):
     """Rename an existing conversation (POST fallback for restricted clients)."""
-    return await rename_conversation(conversation_id, request_body)
+    return await rename_conversation(conversation_id, request_body, request)
 
 
 @app.delete("/api/conversations/{conversation_id}")
-async def delete_conversation(conversation_id: str):
+async def delete_conversation(conversation_id: str, request: Request):
     """Delete a conversation."""
+    user_id = get_current_user(request)
+    conversation = storage.get_conversation(conversation_id)
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    # Verify ownership
+    if conversation.get("user_id") != user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
     deleted = storage.delete_conversation(conversation_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Conversation not found")
@@ -262,9 +361,9 @@ async def delete_conversation(conversation_id: str):
 
 
 @app.post("/api/conversations/{conversation_id}/delete")
-async def delete_conversation_post(conversation_id: str):
+async def delete_conversation_post(conversation_id: str, request: Request):
     """Delete a conversation (POST fallback for restricted clients)."""
-    return await delete_conversation(conversation_id)
+    return await delete_conversation(conversation_id, request)
 
 
 @app.post("/api/conversations/{conversation_id}/message")
@@ -277,9 +376,13 @@ async def send_message(
     Send a message and run the 3-stage council process.
     Returns the complete response with all stages.
     """
+    user_id = get_current_user(request)
     conversation = storage.get_conversation(conversation_id)
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
+    # Verify ownership
+    if conversation.get("user_id") != user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
 
     api_key = get_api_key(request)
     available_models = await fetch_available_models(api_key)
@@ -331,9 +434,13 @@ async def send_message_stream(
     Send a message and stream the 3-stage council process.
     Returns Server-Sent Events as each stage completes.
     """
+    user_id = get_current_user(request)
     conversation = storage.get_conversation(conversation_id)
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
+    # Verify ownership
+    if conversation.get("user_id") != user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
 
     api_key = get_api_key(request)
     available_models = await fetch_available_models(api_key)

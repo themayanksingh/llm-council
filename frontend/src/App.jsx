@@ -3,6 +3,7 @@ import Sidebar from './components/Sidebar';
 import ChatInterface from './components/ChatInterface';
 import SettingsPanel from './components/SettingsPanel';
 import ModalDialog from './components/ModalDialog';
+import Login from './components/Login';
 import { api, configStore } from './api';
 import './App.css';
 
@@ -26,6 +27,12 @@ function App() {
   const [usdInrRate, setUsdInrRate] = useState(83.0);
   const [pendingDeleteConversation, setPendingDeleteConversation] = useState(null);
   const [errorDialog, setErrorDialog] = useState(null);
+  const [isAuthenticated, setIsAuthenticated] = useState(() => {
+    return Boolean(configStore.getJWT());
+  });
+  const [userEmail, setUserEmail] = useState(() => {
+    return localStorage.getItem('user_email') || '';
+  });
 
   // Theme management
   const [theme, setTheme] = useState(() => {
@@ -408,6 +415,26 @@ function App() {
     }
   };
 
+  const handleLoginSuccess = (authData) => {
+    setIsAuthenticated(true);
+    setUserEmail(authData.email);
+    loadConversations();
+  };
+
+  const handleLogout = () => {
+    api.clearJWT();
+    setIsAuthenticated(false);
+    setUserEmail('');
+    setConversations([]);
+    setCurrentConversation(null);
+    setCurrentConversationId(null);
+  };
+
+  // Show login screen if not authenticated
+  if (!isAuthenticated) {
+    return <Login onLoginSuccess={handleLoginSuccess} />;
+  }
+
   return (
     <div className="app">
       <Sidebar
@@ -420,6 +447,8 @@ function App() {
         onDeleteConversation={handleDeleteConversation}
         theme={theme}
         onToggleTheme={toggleTheme}
+        userEmail={userEmail}
+        onLogout={handleLogout}
       />
       <div className="main-area">
         {!Boolean(config.apiKey || hasServerApiAccess) && (

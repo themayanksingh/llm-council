@@ -34,6 +34,8 @@ const STORAGE_KEYS = {
   sessionOnly: 'llm_council_session_only',
   // Track if user has explicitly customized their model selection
   modelsCustomized: 'llm_council_models_customized',
+  // JWT token for authentication
+  jwtToken: 'llm_council_jwt_token',
 };
 
 function getStore() {
@@ -141,6 +143,19 @@ export const configStore = {
       sessionStorage.removeItem(k);
     });
   },
+
+  // JWT token management
+  getJWT() {
+    return localStorage.getItem(STORAGE_KEYS.jwtToken) || '';
+  },
+  setJWT(token) {
+    localStorage.setItem(STORAGE_KEYS.jwtToken, token);
+  },
+  clearJWT() {
+    localStorage.removeItem(STORAGE_KEYS.jwtToken);
+    localStorage.removeItem('user_email');
+    localStorage.removeItem('user_id');
+  },
 };
 
 // --- API client ---
@@ -185,10 +200,65 @@ export const api = {
   },
 
   /**
+   * Request OTP to be sent to email.
+   */
+  async requestOTP(email) {
+    const response = await fetch(`${API_BASE}/api/auth/request-otp`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ email }),
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to send OTP');
+    }
+    return response.json();
+  },
+
+  /**
+   * Verify OTP and get JWT token.
+   */
+  async verifyOTP(email, otp) {
+    const response = await fetch(`${API_BASE}/api/auth/verify-otp`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ email, otp }),
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to verify OTP');
+    }
+    return response.json();
+  },
+
+  // JWT token management (exposed for Login component)
+  getJWT: () => configStore.getJWT(),
+  setJWT: (token) => configStore.setJWT(token),
+  clearJWT: () => configStore.clearJWT(),
+
+  /**
+   * Helper to add auth headers to requests.
+   */
+  _getAuthHeaders() {
+    const headers = {};
+    const jwt = configStore.getJWT();
+    if (jwt) {
+      headers['Authorization'] = `Bearer ${jwt}`;
+    }
+    return headers;
+  },
+
+  /**
    * List all conversations.
    */
   async listConversations() {
-    const response = await fetch(`${API_BASE}/api/conversations`);
+    const response = await fetch(`${API_BASE}/api/conversations`, {
+      headers: this._getAuthHeaders(),
+    });
     if (!response.ok) {
       throw new Error('Failed to list conversations');
     }
@@ -203,6 +273,7 @@ export const api = {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...this._getAuthHeaders(),
       },
       body: JSON.stringify({}),
     });
@@ -217,7 +288,10 @@ export const api = {
    */
   async getConversation(conversationId) {
     const response = await fetch(
-      `${API_BASE}/api/conversations/${conversationId}`
+      `${API_BASE}/api/conversations/${conversationId}`,
+      {
+        headers: this._getAuthHeaders(),
+      }
     );
     if (!response.ok) {
       throw new Error('Failed to get conversation');
@@ -236,6 +310,7 @@ export const api = {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...this._getAuthHeaders(),
         },
         body: JSON.stringify({ title }),
       }
@@ -249,6 +324,7 @@ export const api = {
           method: 'PATCH',
           headers: {
             'Content-Type': 'application/json',
+            ...this._getAuthHeaders(),
           },
           body: JSON.stringify({ title }),
         }
@@ -274,6 +350,7 @@ export const api = {
       `${API_BASE}/api/conversations/${conversationId}/delete`,
       {
         method: 'POST',
+        headers: this._getAuthHeaders(),
       }
     );
 
@@ -283,6 +360,7 @@ export const api = {
         `${API_BASE}/api/conversations/${conversationId}`,
         {
           method: 'DELETE',
+          headers: this._getAuthHeaders(),
         }
       );
     }
@@ -301,7 +379,7 @@ export const api = {
    * Send a message in a conversation.
    */
   async sendMessage(conversationId, content, config = {}) {
-    const headers = { 'Content-Type': 'application/json' };
+    const headers = { 'Content-Type': 'application/json', ...this._getAuthHeaders() };
     if (config.apiKey) headers['X-OpenRouter-Key'] = config.apiKey;
 
     const response = await fetch(
@@ -331,7 +409,7 @@ export const api = {
    * @param {function} onEvent - (eventType, data) => void
    */
   async sendMessageStream(conversationId, content, config = {}, onEvent) {
-    const headers = { 'Content-Type': 'application/json' };
+    const headers = { 'Content-Type': 'application/json', ...this._getAuthHeaders() };
     if (config.apiKey) headers['X-OpenRouter-Key'] = config.apiKey;
 
     const response = await fetch(

@@ -11,6 +11,8 @@ export default function Sidebar({
   onDeleteConversation,
   theme,
   onToggleTheme,
+  userEmail,
+  onLogout,
 }) {
   const [editingId, setEditingId] = useState(null);
   const [editingTitle, setEditingTitle] = useState('');
@@ -92,9 +94,8 @@ export default function Sidebar({
           conversations.map((conv) => (
             <div
               key={conv.id}
-              className={`conversation-item ${
-                conv.id === currentConversationId ? 'active' : ''
-              }`}
+              className={`conversation-item ${conv.id === currentConversationId ? 'active' : ''
+                }`}
               onClick={() => {
                 if (editingId !== conv.id) onSelectConversation(conv.id);
               }}
@@ -181,6 +182,20 @@ export default function Sidebar({
             </div>
           ))
         )}
+      </div>
+
+      <div className="sidebar-footer">
+        <div className="user-info">
+          <span className="user-email">{userEmail}</span>
+        </div>
+        <button className="logout-btn" onClick={onLogout} title="Logout">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+            <polyline points="16 17 21 12 16 7" />
+            <line x1="21" y1="12" x2="9" y2="12" />
+          </svg>
+          Logout
+        </button>
       </div>
     </div>
   );
