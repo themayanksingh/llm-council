@@ -1,25 +1,39 @@
 .stage3 {
-  background: #f0fff0;
-  border-color: #c8e6c8;
+  background: var(--accent-green-bg);
+  border-color: var(--accent-green-border);
+}
+
+.stage3 .stage-title {
+  color: var(--accent-green);
+}
+
+.stage3 .stage-title::before {
+  background: var(--accent-green);
 }
 
 .final-response {
-  background: #ffffff;
-  padding: 20px;
-  border-radius: 6px;
-  border: 1px solid #c8e6c8;
+  background: var(--bg-elevated);
+  padding: 24px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--accent-green-border);
 }
 
 .chairman-label {
-  color: #2d8a2d;
-  font-size: 12px;
-  font-family: monospace;
-  margin-bottom: 12px;
+  color: var(--accent-green);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  margin-bottom: 14px;
   font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 4px 10px;
+  background: rgba(61,176,110,0.06);
+  border-radius: var(--radius-sm);
+  display: inline-block;
 }
 
 .final-text {
-  color: #333;
-  line-height: 1.7;
-  font-size: 15px;
+  color: var(--text-primary);
+  line-height: 1.75;
+  font-size: 14px;
 }

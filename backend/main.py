@@ -60,24 +60,29 @@ def validate_model_selection(
     council_models: Optional[List[str]],
     chairman_model: Optional[str],
     available_model_ids: set[str],
+    default_council_models: List[str],
+    default_chairman_model: str,
+    validate_user_council_ids: bool,
+    validate_user_chairman_id: bool,
 ) -> tuple[List[str], str]:
     """Validate and normalize selected council/chairman models."""
-    selected_council = list(dict.fromkeys(council_models or DEFAULT_COUNCIL_MODELS))
-    selected_chairman = chairman_model or DEFAULT_CHAIRMAN_MODEL
+    selected_council = list(dict.fromkeys(council_models or default_council_models))
+    selected_chairman = chairman_model or default_chairman_model
 
     if len(selected_council) < 2:
         raise HTTPException(status_code=400, detail="At least 2 council models are required.")
     if not selected_chairman:
         raise HTTPException(status_code=400, detail="Chairman model is required.")
 
-    # If model catalog is available, validate IDs strictly.
-    if available_model_ids:
+    # Validate only user-supplied model IDs strictly.
+    if available_model_ids and validate_user_council_ids:
         unknown_council = [m for m in selected_council if m not in available_model_ids]
         if unknown_council:
             raise HTTPException(
                 status_code=400,
                 detail=f"Unknown council model(s): {', '.join(unknown_council)}",
             )
+    if available_model_ids and validate_user_chairman_id:
         if selected_chairman not in available_model_ids:
             raise HTTPException(
                 status_code=400,
@@ -279,10 +284,16 @@ async def send_message(
     api_key = get_api_key(request)
     available_models = await fetch_available_models(api_key)
     available_model_ids = {m.get("id", "") for m in available_models if m.get("id")}
+    default_council_models = get_default_council_models(available_models)
+    default_chairman_model = get_default_chairman_model(available_models)
     council_models, chairman_model = validate_model_selection(
         request_body.council_models,
         request_body.chairman_model,
         available_model_ids,
+        default_council_models,
+        default_chairman_model,
+        validate_user_council_ids=request_body.council_models is not None,
+        validate_user_chairman_id=request_body.chairman_model is not None,
     )
 
     is_first_message = len(conversation["messages"]) == 0
@@ -327,10 +338,16 @@ async def send_message_stream(
     api_key = get_api_key(request)
     available_models = await fetch_available_models(api_key)
     available_model_ids = {m.get("id", "") for m in available_models if m.get("id")}
+    default_council_models = get_default_council_models(available_models)
+    default_chairman_model = get_default_chairman_model(available_models)
     council_models, chairman_model = validate_model_selection(
         request_body.council_models,
         request_body.chairman_model,
         available_model_ids,
+        default_council_models,
+        default_chairman_model,
+        validate_user_council_ids=request_body.council_models is not None,
+        validate_user_chairman_id=request_body.chairman_model is not None,
     )
 
     is_first_message = len(conversation["messages"]) == 0

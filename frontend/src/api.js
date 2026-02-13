@@ -6,8 +6,8 @@ const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8001';
 const FALLBACK_DEFAULTS = {
   council: [
     'openai/gpt-5.2',
-    'anthropic/claude-sonnet-4.5',
     'google/gemini-3-pro-preview',
+    'anthropic/claude-sonnet-4.5',
     'x-ai/grok-4',
   ],
   chairman: 'google/gemini-3-pro-preview',
@@ -58,7 +58,12 @@ export const configStore = {
 
   getCouncilModels() {
     const stored = localStorage.getItem(STORAGE_KEYS.councilModels);
-    return stored ? JSON.parse(stored) : null;
+    if (!stored) return null;
+    try {
+      return JSON.parse(stored);
+    } catch {
+      return null;
+    }
   },
   setCouncilModels(models) {
     localStorage.setItem(STORAGE_KEYS.councilModels, JSON.stringify(models));
@@ -78,6 +83,35 @@ export const configStore = {
   },
   setModelsCustomized(value) {
     localStorage.setItem(STORAGE_KEYS.modelsCustomized, value ? 'true' : 'false');
+  },
+
+  syncDefaults(defaults) {
+    // Keep storage aligned with backend defaults when user has not customized.
+    if (localStorage.getItem(STORAGE_KEYS.modelsCustomized) === 'true') return;
+    if (defaults?.council) {
+      localStorage.setItem(STORAGE_KEYS.councilModels, JSON.stringify(defaults.council));
+    } else {
+      localStorage.removeItem(STORAGE_KEYS.councilModels);
+    }
+    if (defaults?.chairman) {
+      localStorage.setItem(STORAGE_KEYS.chairmanModel, defaults.chairman);
+    } else {
+      localStorage.removeItem(STORAGE_KEYS.chairmanModel);
+    }
+  },
+
+  resetModelCustomization(defaults) {
+    localStorage.removeItem(STORAGE_KEYS.modelsCustomized);
+    if (defaults?.council) {
+      localStorage.setItem(STORAGE_KEYS.councilModels, JSON.stringify(defaults.council));
+    } else {
+      localStorage.removeItem(STORAGE_KEYS.councilModels);
+    }
+    if (defaults?.chairman) {
+      localStorage.setItem(STORAGE_KEYS.chairmanModel, defaults.chairman);
+    } else {
+      localStorage.removeItem(STORAGE_KEYS.chairmanModel);
+    }
   },
 
   isSessionOnly() {

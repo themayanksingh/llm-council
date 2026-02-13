@@ -1,65 +1,104 @@
 .stage {
-  margin: 24px 0;
-  padding: 20px;
-  background: #fafafa;
-  border-radius: 8px;
-  border: 1px solid #e0e0e0;
+  margin: 20px 0;
+  padding: 24px;
+  background: var(--bg-surface);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  animation: fadeInUp 0.4s ease both;
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .stage-title {
-  margin: 0 0 16px 0;
-  color: #333;
-  font-size: 16px;
+  margin: 0 0 18px 0;
+  color: var(--accent-gold);
+  font-size: 14px;
   font-weight: 600;
+  font-family: var(--font-body);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.stage-title::before {
+  content: '';
+  display: inline-block;
+  width: 3px;
+  height: 16px;
+  background: var(--accent-gold);
+  border-radius: 2px;
 }
 
 .tabs {
   display: flex;
-  gap: 8px;
-  margin-bottom: 16px;
+  gap: 4px;
+  margin-bottom: 0;
   flex-wrap: wrap;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0;
 }
 
 .tab {
-  padding: 8px 16px;
-  background: #ffffff;
-  border: 1px solid #d0d0d0;
-  border-radius: 6px 6px 0 0;
-  color: #666;
+  padding: 9px 18px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  color: var(--text-muted);
   cursor: pointer;
-  font-size: 14px;
-  transition: all 0.2s;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: var(--font-body);
+  transition: all var(--transition-fast);
+  position: relative;
+  margin-bottom: -1px;
 }
 
 .tab:hover {
-  background: #f0f0f0;
-  color: #333;
-  border-color: #4a90e2;
+  color: var(--text-secondary);
+  background: var(--bg-elevated);
 }
 
 .tab.active {
-  background: #ffffff;
-  color: #4a90e2;
-  border-color: #4a90e2;
-  border-bottom-color: #ffffff;
+  background: var(--bg-elevated);
+  color: var(--accent-warm);
+  border-color: var(--border);
+  border-bottom-color: var(--bg-elevated);
   font-weight: 600;
 }
 
 .tab-content {
-  background: #ffffff;
-  padding: 16px;
-  border-radius: 6px;
-  border: 1px solid #e0e0e0;
+  background: var(--bg-elevated);
+  padding: 20px;
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+  border: 1px solid var(--border);
+  border-top: none;
 }
 
 .model-name {
-  color: #888;
-  font-size: 12px;
-  margin-bottom: 12px;
-  font-family: monospace;
+  color: var(--text-muted);
+  font-size: 11px;
+  margin-bottom: 14px;
+  font-family: var(--font-mono);
+  letter-spacing: 0.02em;
+  padding: 4px 10px;
+  background: var(--bg-base);
+  border-radius: var(--radius-sm);
+  display: inline-block;
 }
 
 .response-text {
-  color: #333;
-  line-height: 1.6;
+  color: var(--text-primary);
+  line-height: 1.7;
 }

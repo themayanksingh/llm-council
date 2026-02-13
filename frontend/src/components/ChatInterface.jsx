@@ -19,6 +19,7 @@ export default function ChatInterface({
   usdInrRate,
 }) {
   const [input, setInput] = useState('');
+  const [showModelSettings, setShowModelSettings] = useState(false);
   const messagesEndRef = useRef(null);
 
   const modelsById = useMemo(
@@ -88,12 +89,30 @@ export default function ChatInterface({
     }
   };
 
+  const councilSummary = useMemo(() => {
+    const count = (councilModels || []).length;
+    const chairName = modelsById.get(chairmanModel)?.name || chairmanModel || 'None';
+    const shortChair = chairName.split('/').pop();
+    return `${count} models · Chairman: ${shortChair}`;
+  }, [councilModels, chairmanModel, modelsById]);
+
   if (!conversation) {
     return (
       <div className="chat-interface">
         <div className="empty-state">
+          <svg className="empty-state-icon" width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 3v3" />
+            <path d="M12 18v3" />
+            <path d="M4 12h3" />
+            <path d="M17 12h3" />
+            <path d="M6.3 6.3l2.1 2.1" />
+            <path d="M15.6 15.6l2.1 2.1" />
+            <path d="M17.7 6.3l-2.1 2.1" />
+            <path d="M8.4 15.6l-2.1 2.1" />
+            <circle cx="12" cy="12" r="4" />
+          </svg>
           <h2>Welcome to LLM Council</h2>
-          <p>Create a new conversation to get started</p>
+          <p>Create a new conversation to begin deliberation</p>
         </div>
       </div>
     );
@@ -104,8 +123,19 @@ export default function ChatInterface({
       <div className="messages-container">
         {conversation.messages.length === 0 ? (
           <div className="empty-state">
-            <h2>Start a conversation</h2>
-            <p>Ask a question to consult the LLM Council</p>
+            <svg className="empty-state-icon" width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 3v3" />
+              <path d="M12 18v3" />
+              <path d="M4 12h3" />
+              <path d="M17 12h3" />
+              <path d="M6.3 6.3l2.1 2.1" />
+              <path d="M15.6 15.6l2.1 2.1" />
+              <path d="M17.7 6.3l-2.1 2.1" />
+              <path d="M8.4 15.6l-2.1 2.1" />
+              <circle cx="12" cy="12" r="4" />
+            </svg>
+            <h2>The Council Awaits</h2>
+            <p>Pose a question and let multiple LLMs deliberate</p>
           </div>
         ) : (
           conversation.messages.map((msg, index) => (
@@ -172,7 +202,32 @@ export default function ChatInterface({
       </div>
 
       <form className="input-form" onSubmit={handleSubmit}>
-        <div className="input-main">
+        {/* Collapsible model settings */}
+        <div className="input-toolbar">
+          <button
+            type="button"
+            className={`model-toggle-btn ${showModelSettings ? 'active' : ''}`}
+            onClick={() => setShowModelSettings(!showModelSettings)}
+            title="Configure models"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 20h9" />
+              <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+            </svg>
+            <span className="model-toggle-label">{councilSummary}</span>
+            <svg className={`model-toggle-chevron ${showModelSettings ? 'open' : ''}`} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </button>
+
+          <span className="cost-estimate">
+            {hasPricingData
+              ? `Est. ${inrCostLabel} (${usdCostLabel}) · ~${estimatedInputTokens} tokens · ₹${(usdInrRate || 0).toFixed(0)}/USD`
+              : 'Loading model pricing…'}
+          </span>
+        </div>
+
+        {showModelSettings && (
           <div className="input-model-settings">
             <div className="inline-setting-group">
               <div className="inline-setting-label">Council Models</div>
@@ -191,25 +246,25 @@ export default function ChatInterface({
                     </button>
                   </span>
                 ))}
+                {addableModels.length > 0 && (
+                  <select
+                    className="inline-model-add"
+                    value=""
+                    disabled={disabled}
+                    onChange={(e) => onAddCouncilModel(e.target.value)}
+                  >
+                    <option value="">+ Add...</option>
+                    {addableModels.map((model) => (
+                      <option key={model.id} value={model.id}>
+                        {model.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
               </div>
-              {addableModels.length > 0 && (
-                <select
-                  className="inline-model-select"
-                  value=""
-                  disabled={disabled}
-                  onChange={(e) => onAddCouncilModel(e.target.value)}
-                >
-                  <option value="">+ Add model...</option>
-                  {addableModels.map((model) => (
-                    <option key={model.id} value={model.id}>
-                      {model.name}
-                    </option>
-                  ))}
-                </select>
-              )}
             </div>
 
-            <div className="inline-setting-group">
+            <div className="inline-setting-group chairman-group">
               <div className="inline-setting-label">Chairman</div>
               <select
                 className="inline-model-select"
@@ -231,33 +286,31 @@ export default function ChatInterface({
               </select>
             </div>
           </div>
+        )}
 
+        {/* Textarea + send button row */}
+        <div className="input-row">
           <textarea
             className="message-input"
-            placeholder="Ask your question... (Shift+Enter for new line, Enter to send)"
+            placeholder="Ask your question…"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             disabled={isLoading || disabled}
-            rows={3}
+            rows={2}
           />
-          <div className="cost-estimate">
-            {hasPricingData ? (
-              <>
-                Estimated Stage 1 input cost: {inrCostLabel} ({usdCostLabel}) for ~{estimatedInputTokens} input tokens at ₹{(usdInrRate || 0).toFixed(2)}/USD
-              </>
-            ) : (
-              <>Model pricing not available yet. Cost estimate will appear after catalog loads.</>
-            )}
-          </div>
+          <button
+            type="submit"
+            className="send-button"
+            disabled={!input.trim() || isLoading || disabled}
+            title="Send (Enter)"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="22" y1="2" x2="11" y2="13" />
+              <polygon points="22 2 15 22 11 13 2 9 22 2" />
+            </svg>
+          </button>
         </div>
-        <button
-          type="submit"
-          className="send-button"
-          disabled={!input.trim() || isLoading || disabled}
-        >
-          Send
-        </button>
       </form>
     </div>
   );

@@ -86,16 +86,16 @@ export default function SettingsPanel({
   };
 
   const handleResetDefaults = () => {
-    configStore.clearAll();
-    // Also clear the customized flag
-    localStorage.removeItem('llm_council_models_customized');
+    const defaults = {
+      council: config.defaults?.council || [],
+      chairman: config.defaults?.chairman || '',
+    };
+    configStore.resetModelCustomization(defaults);
     onConfigChange({
-      apiKey: '',
-      councilModels: config.defaults?.council || [],
-      chairmanModel: config.defaults?.chairman || '',
+      councilModels: defaults.council,
+      chairmanModel: defaults.chairman,
+      modelsCustomized: false,
     });
-    setApiKeyInput('');
-    setSessionOnly(false);
   };
 
   // Helper: display name for a model ID

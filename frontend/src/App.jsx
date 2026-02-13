@@ -9,8 +9,8 @@ import './App.css';
 const FALLBACK_DEFAULTS = {
   council: [
     'openai/gpt-5.2',
-    'anthropic/claude-sonnet-4.5',
     'google/gemini-3-pro-preview',
+    'anthropic/claude-sonnet-4.5',
     'x-ai/grok-4',
   ],
   chairman: 'google/gemini-3-pro-preview',
@@ -27,12 +27,29 @@ function App() {
   const [pendingDeleteConversation, setPendingDeleteConversation] = useState(null);
   const [errorDialog, setErrorDialog] = useState(null);
 
-  // Config state - models will be populated from backend defaults
-  // Only use localStorage if user has explicitly customized
+  // Theme management
+  const [theme, setTheme] = useState(() => {
+    return localStorage.getItem('llm_council_theme') || 'dark';
+  });
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('llm_council_theme', theme);
+  }, [theme]);
+
+  const toggleTheme = () => {
+    setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
+  };
+
+  const hasCustomizedModels = configStore.isModelsCustomized();
+  const storedCouncilModels = configStore.getCouncilModels();
+  const storedChairmanModel = configStore.getChairmanModel();
+
+  // Config state - use backend defaults unless user explicitly customized models.
   const [config, setConfig] = useState({
     apiKey: configStore.getApiKey(),
-    councilModels: null,  // Will be set from backend defaults
-    chairmanModel: null, // Will be set from backend defaults
+    councilModels: hasCustomizedModels ? storedCouncilModels : null,
+    chairmanModel: hasCustomizedModels ? storedChairmanModel : null,
     availableModels: [],
     defaults: { council: [], chairman: '' },
   });
@@ -45,32 +62,55 @@ function App() {
   // Fetch available models when API key changes (or when using server-side fallback key)
   const fetchModels = useCallback(async (apiKey) => {
     const isCustomized = configStore.isModelsCustomized();
+    const storedCouncil = configStore.getCouncilModels();
+    const storedChairman = configStore.getChairmanModel();
     try {
       const data = await api.getAvailableModels(apiKey);
+      const latestDefaults = data.defaults || FALLBACK_DEFAULTS;
+      const nextCouncil = (isCustomized && Array.isArray(storedCouncil) && storedCouncil.length >= 2)
+        ? storedCouncil
+        : latestDefaults.council || FALLBACK_DEFAULTS.council;
+      const nextChairman = (isCustomized && storedChairman)
+        ? storedChairman
+        : latestDefaults.chairman || FALLBACK_DEFAULTS.chairman;
+
+      if (!isCustomized) {
+        configStore.syncDefaults({
+          council: nextCouncil,
+          chairman: nextChairman,
+        });
+      }
+
       setHasServerApiAccess(true);
       setConfig((prev) => ({
         ...prev,
         availableModels: data.models || [],
-        defaults: data.defaults || prev.defaults,
-        // Only use localStorage if user explicitly customized, otherwise use latest from backend
-        councilModels: (isCustomized && prev.councilModels) 
-          ? prev.councilModels 
-          : data.defaults?.council || prev.defaults?.council || [],
-        chairmanModel: (isCustomized && prev.chairmanModel) 
-          ? prev.chairmanModel 
-          : data.defaults?.chairman || prev.defaults?.chairman || '',
+        defaults: latestDefaults,
+        councilModels: nextCouncil,
+        chairmanModel: nextChairman,
       }));
     } catch (err) {
+      const fallbackDefaults = FALLBACK_DEFAULTS;
+      const nextCouncil = (isCustomized && Array.isArray(storedCouncil) && storedCouncil.length >= 2)
+        ? storedCouncil
+        : fallbackDefaults.council;
+      const nextChairman = (isCustomized && storedChairman)
+        ? storedChairman
+        : fallbackDefaults.chairman;
+
+      if (!isCustomized) {
+        configStore.syncDefaults({
+          council: nextCouncil,
+          chairman: nextChairman,
+        });
+      }
+
       setHasServerApiAccess(false);
       setConfig((prev) => ({
         ...prev,
-        defaults: prev.defaults?.council?.length ? prev.defaults : FALLBACK_DEFAULTS,
-        councilModels: (isCustomized && prev.councilModels) 
-          ? prev.councilModels 
-          : prev.defaults?.council || FALLBACK_DEFAULTS.council,
-        chairmanModel: (isCustomized && prev.chairmanModel) 
-          ? prev.chairmanModel 
-          : prev.defaults?.chairman || FALLBACK_DEFAULTS.chairman,
+        defaults: fallbackDefaults,
+        councilModels: nextCouncil,
+        chairmanModel: nextChairman,
       }));
       console.error('Failed to fetch models:', err);
     }
@@ -120,6 +160,12 @@ function App() {
   };
 
   const handleNewConversation = async () => {
+    // Don't create if any conversation already has 0 messages — switch to it instead
+    const emptyConv = conversations.find((c) => c.message_count === 0);
+    if (emptyConv) {
+      setCurrentConversationId(emptyConv.id);
+      return;
+    }
     try {
       const newConv = await api.createConversation();
       setConversations([
@@ -188,6 +234,9 @@ function App() {
   };
 
   const handleConfigChange = (updates) => {
+    if (Object.prototype.hasOwnProperty.call(updates, 'modelsCustomized')) {
+      configStore.setModelsCustomized(Boolean(updates.modelsCustomized));
+    }
     if (Object.prototype.hasOwnProperty.call(updates, 'councilModels')) {
       configStore.setCouncilModels(updates.councilModels);
     }
@@ -202,6 +251,7 @@ function App() {
     const current = config.councilModels || [];
     if (current.includes(modelId)) return;
     const next = [...current, modelId];
+    configStore.setModelsCustomized(true);
     configStore.setCouncilModels(next);
     setConfig((prev) => ({ ...prev, councilModels: next }));
   };
@@ -210,11 +260,13 @@ function App() {
     const current = config.councilModels || [];
     const next = current.filter((id) => id !== modelId);
     if (next.length < 2) return;
+    configStore.setModelsCustomized(true);
     configStore.setCouncilModels(next);
     setConfig((prev) => ({ ...prev, councilModels: next }));
   };
 
   const handleChangeChairmanModel = (modelId) => {
+    configStore.setModelsCustomized(true);
     configStore.setChairmanModel(modelId);
     setConfig((prev) => ({ ...prev, chairmanModel: modelId }));
   };
@@ -366,6 +418,8 @@ function App() {
         onOpenSettings={() => setSettingsOpen(true)}
         onRenameConversation={handleRenameConversation}
         onDeleteConversation={handleDeleteConversation}
+        theme={theme}
+        onToggleTheme={toggleTheme}
       />
       <div className="main-area">
         {!Boolean(config.apiKey || hasServerApiAccess) && (
