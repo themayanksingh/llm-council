@@ -4,18 +4,73 @@ import os
 import json
 import secrets
 import hashlib
+import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, Dict, Any
+from collections import defaultdict
 import jwt
 
 # Configuration
 DATA_DIR = os.getenv("DATA_DIR", "./data")
 USERS_DIR = os.path.join(DATA_DIR, "users")
 OTP_EXPIRY_MINUTES = 10
-JWT_SECRET = os.getenv("JWT_SECRET", "dev-secret-change-in-production")
 JWT_ALGORITHM = "HS256"
-JWT_EXPIRY_DAYS = 30
+JWT_EXPIRY_DAYS = 7  # Reduced from 30 days
+MAX_OTP_ATTEMPTS = 5
+OTP_LOCKOUT_MINUTES = 15
+
+# Rate limiting storage (in-memory, resets on restart)
+_rate_limit_store = defaultdict(list)
+_otp_attempts = defaultdict(int)
+
+# Environment detection
+IS_PRODUCTION = os.getenv("ENVIRONMENT", "development").lower() == "production"
+
+
+def validate_jwt_secret():
+    """
+    Validate JWT_SECRET at startup.
+    Fails fast if missing or weak in production.
+    """
+    jwt_secret = os.getenv("JWT_SECRET", "")
+    
+    if not jwt_secret:
+        if IS_PRODUCTION:
+            print("FATAL: JWT_SECRET environment variable is required in production")
+            sys.exit(1)
+        else:
+            print("WARNING: Using default JWT_SECRET for development. DO NOT use in production!")
+            return "dev-secret-change-in-production"
+    
+    # Require minimum 32 bytes (64 hex characters) for production
+    if IS_PRODUCTION and len(jwt_secret) < 32:
+        print(f"FATAL: JWT_SECRET must be at least 32 characters in production (got {len(jwt_secret)})")
+        sys.exit(1)
+    
+    return jwt_secret
+
+
+def validate_email_config():
+    """
+    Validate email configuration at startup.
+    Fails fast if not configured in production.
+    """
+    email_api_key = os.getenv("EMAIL_API_KEY", "")
+    email_service = os.getenv("EMAIL_SERVICE", "").lower()
+    
+    if IS_PRODUCTION and not email_api_key:
+        print("FATAL: EMAIL_API_KEY is required in production")
+        sys.exit(1)
+    
+    if IS_PRODUCTION and email_service not in ["resend", "sendgrid", "mailgun"]:
+        print(f"FATAL: EMAIL_SERVICE must be one of [resend, sendgrid, mailgun] in production (got '{email_service}')")
+        sys.exit(1)
+
+
+# Initialize and validate configuration
+JWT_SECRET = validate_jwt_secret()
+validate_email_config()
 
 
 def ensure_users_dir():
@@ -54,6 +109,7 @@ def create_user(email: str) -> Dict[str, Any]:
         "id": user_id,
         "email": email,
         "created_at": datetime.utcnow().isoformat(),
+        "token_version": 0,  # For future token revocation
     }
     
     # Save to file
@@ -99,12 +155,45 @@ def get_user_by_id(user_id: str) -> Optional[Dict[str, Any]]:
     for filename in os.listdir(USERS_DIR):
         if filename.endswith('.json'):
             path = os.path.join(USERS_DIR, filename)
-            with open(path, 'r') as f:
-                user = json.load(f)
-                if user.get('id') == user_id:
-                    return user
+            try:
+                with open(path, 'r') as f:
+                    user = json.load(f)
+                    if user.get('id') == user_id:
+                        return user
+            except (json.JSONDecodeError, KeyError):
+                continue
     
     return None
+
+
+def check_rate_limit(key: str, max_requests: int, window_minutes: int) -> bool:
+    """
+    Check if a rate limit has been exceeded.
+    
+    Args:
+        key: Rate limit key (e.g., IP address or email)
+        max_requests: Maximum requests allowed
+        window_minutes: Time window in minutes
+        
+    Returns:
+        True if within limit, False if exceeded
+    """
+    now = datetime.utcnow()
+    cutoff = now - timedelta(minutes=window_minutes)
+    
+    # Clean old entries
+    _rate_limit_store[key] = [
+        timestamp for timestamp in _rate_limit_store[key]
+        if timestamp > cutoff
+    ]
+    
+    # Check limit
+    if len(_rate_limit_store[key]) >= max_requests:
+        return False
+    
+    # Record this request
+    _rate_limit_store[key].append(now)
+    return True
 
 
 def generate_otp() -> str:
@@ -124,9 +213,13 @@ def store_otp(email: str, otp: str):
     if not user:
         user = create_user(email)
     
+    # Reset attempt counter when new OTP is generated
+    _otp_attempts[email] = 0
+    
     # Add OTP and expiry to user record
     user['otp'] = otp
     user['otp_expires_at'] = (datetime.utcnow() + timedelta(minutes=OTP_EXPIRY_MINUTES)).isoformat()
+    user['otp_created_at'] = datetime.utcnow().isoformat()
     
     # Save updated user
     path = get_user_path(email)
@@ -134,43 +227,55 @@ def store_otp(email: str, otp: str):
         json.dump(user, f, indent=2)
 
 
-def verify_otp(email: str, otp: str) -> bool:
+def verify_otp(email: str, otp: str) -> tuple[bool, Optional[str]]:
     """
-    Verify OTP for a user.
+    Verify OTP for a user with attempt limiting.
     
     Args:
         email: User's email address
         otp: OTP to verify
         
     Returns:
-        True if OTP is valid and not expired, False otherwise
+        Tuple of (success: bool, error_message: Optional[str])
     """
     user = get_user_by_email(email)
     if not user:
-        return False
+        return False, "Invalid email or OTP"
     
     stored_otp = user.get('otp')
     expiry = user.get('otp_expires_at')
     
     if not stored_otp or not expiry:
-        return False
+        return False, "No OTP found. Please request a new one"
     
     # Check expiry
     if datetime.utcnow() > datetime.fromisoformat(expiry):
-        return False
+        return False, "OTP has expired. Please request a new one"
+    
+    # Check attempt limit
+    if _otp_attempts[email] >= MAX_OTP_ATTEMPTS:
+        return False, f"Too many failed attempts. Please wait {OTP_LOCKOUT_MINUTES} minutes and request a new OTP"
     
     # Check OTP match
     if stored_otp != otp:
-        return False
+        _otp_attempts[email] += 1
+        remaining = MAX_OTP_ATTEMPTS - _otp_attempts[email]
+        if remaining > 0:
+            return False, f"Invalid OTP. {remaining} attempts remaining"
+        else:
+            return False, f"Too many failed attempts. Please wait {OTP_LOCKOUT_MINUTES} minutes and request a new OTP"
     
-    # Clear OTP after successful verification
+    # Clear OTP and attempts after successful verification
     user.pop('otp', None)
     user.pop('otp_expires_at', None)
+    user.pop('otp_created_at', None)
+    _otp_attempts.pop(email, None)
+    
     path = get_user_path(email)
     with open(path, 'w') as f:
         json.dump(user, f, indent=2)
     
-    return True
+    return True, None
 
 
 def generate_jwt(user_id: str) -> str:
@@ -194,6 +299,7 @@ def generate_jwt(user_id: str) -> str:
 def verify_jwt(token: str) -> Optional[str]:
     """
     Verify JWT token and extract user_id.
+    Also verifies that the user still exists.
     
     Args:
         token: JWT token string
@@ -203,7 +309,14 @@ def verify_jwt(token: str) -> Optional[str]:
     """
     try:
         payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
-        return payload.get('user_id')
+        user_id = payload.get('user_id')
+        
+        # Verify user still exists
+        user = get_user_by_id(user_id)
+        if not user:
+            return None
+        
+        return user_id
     except jwt.ExpiredSignatureError:
         return None
     except jwt.InvalidTokenError:
@@ -225,10 +338,15 @@ async def send_otp_email(email: str, otp: str) -> bool:
     email_api_key = os.getenv("EMAIL_API_KEY", "")
     email_from = os.getenv("EMAIL_FROM", "noreply@llm-council.app")
     
+    # In production, email must be configured
+    if IS_PRODUCTION and not email_api_key:
+        print("ERROR: Cannot send OTP in production without EMAIL_API_KEY")
+        return False
+    
+    # Development mode: print OTP to console
     if not email_api_key:
-        # Development mode: print OTP to console
         print(f"\n{'='*50}")
-        print(f"OTP for {email}: {otp}")
+        print(f"DEV MODE - OTP for {email}: {otp}")
         print(f"{'='*50}\n")
         return True
     
@@ -285,11 +403,8 @@ async def send_otp_email(email: str, otp: str) -> bool:
                 return response.status_code == 202
         
         else:
-            # Fallback: print to console
-            print(f"\n{'='*50}")
-            print(f"OTP for {email}: {otp}")
-            print(f"{'='*50}\n")
-            return True
+            print(f"ERROR: Unsupported email service: {email_service}")
+            return False
             
     except Exception as e:
         print(f"Error sending email: {e}")

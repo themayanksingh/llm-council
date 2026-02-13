@@ -163,6 +163,13 @@ class SendMessageRequest(BaseModel):
     content: str
     council_models: Optional[List[str]] = None
     chairman_model: Optional[str] = None
+    
+    def model_post_init(self, __context) -> None:
+        """Validate request after initialization."""
+        if len(self.content) > 10000:
+            raise ValueError("Message content must be 10,000 characters or less")
+        if self.council_models and len(self.council_models) > 10:
+            raise ValueError("Maximum 10 council models allowed")
 
 
 class RenameConversationRequest(BaseModel):
@@ -213,7 +220,7 @@ async def root():
 
 
 @app.post("/api/auth/request-otp")
-async def request_otp(request_body: RequestOTPRequest):
+async def request_otp(request_body: RequestOTPRequest, request: Request):
     """Send OTP to user's email."""
     email = request_body.email.lower().strip()
     
@@ -221,14 +228,32 @@ async def request_otp(request_body: RequestOTPRequest):
     if "@" not in email or "." not in email:
         raise HTTPException(status_code=400, detail="Invalid email address")
     
+    # Rate limiting: per-email (3 requests per hour)
+    if not auth.check_rate_limit(f"otp_email:{email}", max_requests=3, window_minutes=60):
+        raise HTTPException(
+            status_code=429,
+            detail="Too many OTP requests. Please try again later"
+        )
+    
+    # Rate limiting: per-IP (10 requests per hour)
+    client_ip = request.client.host if request.client else "unknown"
+    if not auth.check_rate_limit(f"otp_ip:{client_ip}", max_requests=10, window_minutes=60):
+        raise HTTPException(
+            status_code=429,
+            detail="Too many requests from your IP. Please try again later"
+        )
+    
     # Generate and store OTP
     otp = auth.generate_otp()
     auth.store_otp(email, otp)
     
     # Send OTP via email
-    success = await auth.send_otp_email(email, otp)
-    
-    if not success:
+    try:
+        success = await auth.send_otp_email(email, otp)
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to send OTP email")
+    except Exception:
+        # Sanitize error - don't expose internal details
         raise HTTPException(status_code=500, detail="Failed to send OTP email")
     
     return {"message": "OTP sent to email", "email": email}
@@ -240,9 +265,10 @@ async def verify_otp(request_body: VerifyOTPRequest):
     email = request_body.email.lower().strip()
     otp = request_body.otp.strip()
     
-    # Verify OTP
-    if not auth.verify_otp(email, otp):
-        raise HTTPException(status_code=401, detail="Invalid or expired OTP")
+    # Verify OTP (includes attempt limiting)
+    success, error_message = auth.verify_otp(email, otp)
+    if not success:
+        raise HTTPException(status_code=401, detail=error_message or "Invalid or expired OTP")
     
     # Get or create user
     user = auth.get_user_by_email(email)
