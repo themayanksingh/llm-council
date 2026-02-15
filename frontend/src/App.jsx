@@ -435,26 +435,67 @@ function App() {
     return <Login onLoginSuccess={handleLoginSuccess} />;
   }
 
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+
+  // ... existing authenticaton logic ...
+
+  const toggleMobileSidebar = () => {
+    setIsMobileSidebarOpen(!isMobileSidebarOpen);
+  };
+
+  // Close sidebar when selecting conversation on mobile
+  const handleSelectConversationMobile = (id) => {
+    handleSelectConversation(id);
+    setIsMobileSidebarOpen(false);
+  };
+
   return (
     <div className="app">
-      <Sidebar
-        conversations={conversations}
-        currentConversationId={currentConversationId}
-        onSelectConversation={handleSelectConversation}
-        onNewConversation={handleNewConversation}
-        onOpenSettings={() => setSettingsOpen(true)}
-        onRenameConversation={handleRenameConversation}
-        onDeleteConversation={handleDeleteConversation}
-        theme={theme}
-        onToggleTheme={toggleTheme}
-        userEmail={userEmail}
-        onLogout={handleLogout}
-      />
+      <div className={`sidebar-wrapper ${isMobileSidebarOpen ? 'open' : ''}`}>
+        <Sidebar
+          conversations={conversations}
+          currentConversationId={currentConversationId}
+          onSelectConversation={handleSelectConversationMobile}
+          onNewConversation={() => {
+            handleNewConversation();
+            setIsMobileSidebarOpen(false);
+          }}
+          onOpenSettings={() => setSettingsOpen(true)}
+          onRenameConversation={handleRenameConversation}
+          onDeleteConversation={handleDeleteConversation}
+          theme={theme}
+          onToggleTheme={toggleTheme}
+          userEmail={userEmail}
+          onLogout={handleLogout}
+        />
+      </div>
+
+      {/* Mobile Toggle Button */}
+      <button
+        className="mobile-menu-btn"
+        onClick={toggleMobileSidebar}
+        aria-label="Toggle Menu"
+      >
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <line x1="3" y1="12" x2="21" y2="12" />
+          <line x1="3" y1="6" x2="21" y2="6" />
+          <line x1="3" y1="18" x2="21" y2="18" />
+        </svg>
+      </button>
+
+      {/* Mobile Overlay */}
+      {isMobileSidebarOpen && (
+        <div
+          className="mobile-overlay"
+          onClick={() => setIsMobileSidebarOpen(false)}
+        />
+      )}
+
       <div className="main-area">
         {!Boolean(config.apiKey || hasServerApiAccess) && (
           <div className="api-key-banner">
-            <span>Set your OpenRouter API key to get started.</span>
-            <button onClick={() => setSettingsOpen(true)}>Open Settings</button>
+            <span>⚠️ OpenRouter API Key required</span>
+            <button onClick={() => setSettingsOpen(true)}>Set Key</button>
           </div>
         )}
         <ChatInterface

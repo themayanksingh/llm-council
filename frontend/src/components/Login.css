@@ -174,3 +174,27 @@
   font-size: 13px;
   text-align: center;
 }
+
+@media (max-width: 480px) {
+  .login-card {
+    padding: 24px;
+    box-shadow: none;
+    border: none;
+    background: transparent;
+  }
+
+  .login-container {
+    padding: 16px;
+    align-items: flex-start;
+    padding-top: 40px;
+  }
+
+  .login-header h1 {
+    font-size: 24px;
+  }
+
+  .otp-input {
+    font-size: 20px;
+    letter-spacing: 6px;
+  }
+}
