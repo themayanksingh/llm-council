@@ -67,13 +67,52 @@ function App() {
   }, []);
 
   // Fetch available models when API key changes (or when using server-side fallback key)
-  const fetchModels = useCallback(async (apiKey) => {
-    const isCustomized = configStore.isModelsCustomized();
-    const storedCouncil = configStore.getCouncilModels();
-    const storedChairman = configStore.getChairmanModel();
+  const fetchModels = useCallback(async (key) => {
+    // Helper to Apply Defaults
+    const applyDefaults = () => {
+      const isCustomized = configStore.isModelsCustomized();
+      const storedCouncil = configStore.getCouncilModels();
+      const storedChairman = configStore.getChairmanModel();
+
+      const nextCouncil = (isCustomized && Array.isArray(storedCouncil) && storedCouncil.length >= 2)
+        ? storedCouncil
+        : FALLBACK_DEFAULTS.council;
+      const nextChairman = (isCustomized && storedChairman)
+        ? storedChairman
+        : FALLBACK_DEFAULTS.chairman;
+
+      if (!isCustomized) {
+        configStore.syncDefaults({
+          council: nextCouncil,
+          chairman: nextChairman,
+        });
+      }
+
+      setConfig((prev) => ({
+        ...prev,
+        availableModels: [],
+        defaults: FALLBACK_DEFAULTS,
+        councilModels: nextCouncil,
+        chairmanModel: nextChairman,
+      }));
+    };
+
+    if (!key) {
+      setHasServerApiAccess(false);
+      applyDefaults();
+      return;
+    }
+
+    setIsLoading(true);
     try {
-      const data = await api.getAvailableModels(apiKey);
+      const data = await api.getAvailableModels(key);
       const latestDefaults = data.defaults || FALLBACK_DEFAULTS;
+
+      // Logic to preserve user customization if it exists
+      const isCustomized = configStore.isModelsCustomized();
+      const storedCouncil = configStore.getCouncilModels();
+      const storedChairman = configStore.getChairmanModel();
+
       const nextCouncil = (isCustomized && Array.isArray(storedCouncil) && storedCouncil.length >= 2)
         ? storedCouncil
         : latestDefaults.council || FALLBACK_DEFAULTS.council;
@@ -97,29 +136,11 @@ function App() {
         chairmanModel: nextChairman,
       }));
     } catch (err) {
-      const fallbackDefaults = FALLBACK_DEFAULTS;
-      const nextCouncil = (isCustomized && Array.isArray(storedCouncil) && storedCouncil.length >= 2)
-        ? storedCouncil
-        : fallbackDefaults.council;
-      const nextChairman = (isCustomized && storedChairman)
-        ? storedChairman
-        : fallbackDefaults.chairman;
-
-      if (!isCustomized) {
-        configStore.syncDefaults({
-          council: nextCouncil,
-          chairman: nextChairman,
-        });
-      }
-
+      console.warn('Failed to fetch models (likely invalid key):', err.message);
       setHasServerApiAccess(false);
-      setConfig((prev) => ({
-        ...prev,
-        defaults: fallbackDefaults,
-        councilModels: nextCouncil,
-        chairmanModel: nextChairman,
-      }));
-      console.error('Failed to fetch models:', err);
+      applyDefaults();
+    } finally {
+      setIsLoading(false);
     }
   }, []);
 

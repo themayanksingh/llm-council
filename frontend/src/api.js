@@ -260,6 +260,11 @@ export const api = {
       headers: this._getAuthHeaders(),
     });
     if (!response.ok) {
+      console.error('List conversations failed:', response.status, await response.text());
+      if (response.status === 401) {
+        this.clearJWT();
+        window.location.reload(); // Force re-login
+      }
       throw new Error('Failed to list conversations');
     }
     return response.json();
