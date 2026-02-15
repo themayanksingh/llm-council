@@ -30,7 +30,7 @@ from .council import (
 
 app = FastAPI(title="LLM Council API")
 
-# CORS: localhost for dev + configurable production origins
+# CORS: localhost + configurable origins + Vercel previews
 _origins = ["http://localhost:5173", "http://localhost:3000"]
 _extra = os.getenv("ALLOWED_ORIGINS", "")
 if _extra:
@@ -39,6 +39,7 @@ if _extra:
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_origins,
+    allow_origin_regex=r"https://.*\.vercel\.app",  # Allow all Vercel previews
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
